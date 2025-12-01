@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Constraints UI → tensor</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111827" />
+  <style>
+      
+    body { font-family: system-ui, sans-serif; margin: 0; background:#0b1020; color:#e5e7eb; }
+    header { padding:16px 20px; background:#111827; position:sticky; top:0; }
+    h1 { font-size:18px; margin:0; }
+    main { padding:20px; display:grid; gap:16px; grid-template-columns: 1fr; max-width: 900px; margin:auto; }
+    .card { background:#111827; border:1px solid #1f2937; border-radius:14px; padding:14px; box-shadow:0 6px 24px rgba(0,0,0,.25); }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:flex-start; }
+    label { font-size:12px; color:#9ca3af; display:block; margin-bottom:6px; }
+    .checklist { border:1px solid #334155; border-radius:10px; padding:8px; background:#0b1020; max-height:220px; overflow:auto; }
+    .check-item { display:flex; align-items:center; gap:6px; font-size:13px; margin-bottom:4px; }
+    .check-item input[type="checkbox"] { accent-color:#2563eb; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#0b1020; border:1px solid #334155; margin:2px; font-size:12px; }
+    button { background:#2563eb; color:white; border:0; padding:8px 10px; border-radius:10px; cursor:pointer; }
+    button.secondary { background:#0b1020; color:#e5e7eb; border:1px solid #334155; }
+    button:disabled { opacity:0.5; cursor:default; }
+    .muted { color:#9ca3af; font-size:12px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .log { font-family: ui-monospace, monospace; font-size:12px; background:#0b1020; border:1px dashed #334155; padding:8px; border-radius:10px; white-space:pre-wrap; }
+          /* State space graph */
+    .graph-title { font-size:14px; margin:0 0 8px 0; }
+    .graph-caption { color:#9ca3af; font-size:12px; margin-top:4px; }
+
+    svg.state-graph {
+      width:100%;
+      max-width:600px;
+      display:block;
+      margin:auto;
+    }
+
+    .node-circle {
+      fill:#111827;
+      stroke:#4b5563;
+      stroke-width:2;
+    }
+    .node-circle.current {
+      fill:#22c55e;   /* nåværende tilstand → grønn */
+    }
+    .node-circle.blindspot {
+      fill:#b91c1c;   /* blind spot → rød */
+    }
+
+    .node-label {
+      fill:#e5e7eb;
+      font-size:10px;
+      text-anchor:middle;
+    }
+
+    .edge-line {
+      stroke:#4b5563;
+      stroke-width:1.5;
+      stroke-dasharray:4 3;
+    }
+
+  </style>
+</head>
+<body>
+<header>
+  <h1>Constraint-UI → nåbarhet vs. gyldighet</h1>
+</header>
+
+<main>
+  <section class="card">
+    <!-- Kategori + forfatter -->
+    <div class="row">
+      <div>
+        <label>Kategori (multivalg)</label>
+        <div id="catSelect" class="checklist"></div>
+      </div>
+      <div>
+        <label>Forfatter (multivalg)</label>
+        <div id="authSelect" class="checklist"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div class="muted">Valgte kategorier:</div>
+      <div id="catPills"></div>
+      <div class="muted" style="margin-top:6px;">Valgte forfattere:</div>
+      <div id="authPills"></div>
+    </div>
+
+    <div class="grid2" style="margin-top:12px;">
+      <button id="resetBtn" class="secondary">Reset</button>
+      <button id="installBtn" style="display:none;">Installer PWA</button>
+    </div>
+  </section>
+
+  <!-- Korpusbygging -->
+  <section class="card">
+    <h2 style="font-size:14px;margin:0 0 8px 0;">Korpusbygger (union-modus)</h2>
+    <div class="grid2">
+      <button id="addSubcorpusBtn">Legg til delkorpus</button>
+      <button id="unionBtn" class="secondary">Union delkorpus</button>
+    </div>
+    <div class="muted" style="margin-top:8px;">
+      Bygg delkorpuser uavhengig av nåbarhet, og ta union — demonstrerer forskjellen mellom lokal generering og global validering.
+    </div>
+    <div id="subcorpora" style="margin-top:8px;"></div>
+    <div class="muted" style="margin-top:8px;">Union-resultat:</div>
+    <div id="unionOut" class="log"></div>
+  </section>
+
+  <!-- Logg -->
+  <section class="card">
+    <h2 style="font-size:14px;margin:0 0 8px 0;">Logg</h2>
+    <div id="log" class="log"></div>
+  </section>
+      <section class="card">
+    <h2 class="graph-title">Tilstandsrom (nåbarhet vs. gyldighet)</h2>
+    <svg class="state-graph" viewBox="0 0 400 200">
+      <!-- Kanter (stier) -->
+      <line x1="80" y1="150" x2="200" y2="50" class="edge-line" />
+      <line x1="200" y1="50" x2="320" y2="150" class="edge-line" />
+
+      <!-- Noder -->
+      <!-- S0: start (∅, ∅) -->
+      <circle id="node-S0" cx="80" cy="150" r="18" class="node-circle" />
+      <text x="80" y="148" class="node-label">S0</text>
+      <text x="80" y="164" class="node-label">∅, ∅</text>
+
+      <!-- S1: {barnebok, dramatikk}, {Løland} -->
+      <circle id="node-S1" cx="200" cy="50" r="18" class="node-circle" />
+      <text x="200" y="48" class="node-label">S1</text>
+      <text x="200" y="64" class="node-label">B+D, Løland</text>
+
+      <!-- S2: {dramatikk}, {Ibsen} -->
+      <circle id="node-S2" cx="200" cy="150" r="18" class="node-circle" />
+      <text x="200" y="148" class="node-label">S2</text>
+      <text x="200" y="164" class="node-label">D, Ibsen</text>
+
+      <!-- S3: {barnebok, dramatikk}, {Ibsen, Rabbe} → “blind spot” -->
+      <circle id="node-S3" cx="320" cy="150" r="18" class="node-circle blindspot" />
+      <text x="320" y="148" class="node-label">S3</text>
+      <text x="320" y="164" class="node-label">B+D, I+R</text>
+    </svg>
+    <p class="graph-caption">
+      S0 er start. S1 er Løland som “rundebøye”, S2 en vanlig Ibsen-tilstand, og S3 en
+      idealisert gyldig kombinasjon (blind sone): konsistent i modellen, men ikke
+      nødvendigvis nåbar via trinnvis pruning.
+    </p>
+  </section>
+
+</main>
+
+<script>
+
+// --- State space: abstrakte tilstander vi vil illustrere i grafen
+const STATE_NODES = [
+  { id: "S0", cats: [], authors: [] },
+  { id: "S1", cats: ["barnebok", "dramatikk"], authors: ["Løland"] },
+  { id: "S2", cats: ["dramatikk"], authors: ["Ibsen"] },
+  // S3 er en "ideell" blind spot – vi matcher den ikke direkte, den er bare merket visuelt
+  { id: "S3", cats: ["barnebok", "dramatikk"], authors: ["Ibsen", "Rabbe"], blindspot: true }
+];
+
+function sameSet(setObj, arr) {
+  if (setObj.size !== arr.length) return false;
+  for (const x of arr) if (!setObj.has(x)) return false;
+  return true;
+}
+
+function updateGraphHighlight() {
+  STATE_NODES.forEach(node => {
+    const el = document.getElementById("node-" + node.id);
+    if (!el) return;
+
+    let cls = "node-circle";
+    if (node.blindspot) {
+      cls += " blindspot";
+    }
+
+    // Marker node som "current" hvis den matcher nåværende UI-tilstand
+    if (sameSet(selectedCats, node.cats) && sameSet(selectedAuthors, node.authors)) {
+      cls += " current";
+    }
+
+    el.setAttribute("class", cls);
+  });
+}
+
+    
+const DATA = {
+  authors: {
+    "Ibsen": ["dramatikk"],
+    "Rabbe": ["barnebok"],
+    "Løland": ["barnebok", "dramatikk"],
+    "Prøysen": ["barnebok"],
+    "Fosse": ["dramatikk"]
+  },
+  categories: ["barnebok", "dramatikk", "roman", "sakprosa"]
+};
+
+const catContainer = document.getElementById("catSelect");
+const authContainer = document.getElementById("authSelect");
+const catPills = document.getElementById("catPills");
+const authPills = document.getElementById("authPills");
+const logEl = document.getElementById("log");
+
+let selectedCats = new Set();
+let selectedAuthors = new Set();
+
+const authorCats = (a) => new Set(DATA.authors[a] || []);
+
+const unionSet = (sets) => {
+  const u = new Set();
+  sets.forEach(s => s.forEach(x => u.add(x)));
+  return u;
+};
+
+function log(msg) {
+  logEl.textContent = msg + "\n\n" + logEl.textContent;
+}
+
+function renderPills() {
+  catPills.innerHTML = [...selectedCats].map(c => `<span class="pill">${c}</span>`).join("");
+  authPills.innerHTML = [...selectedAuthors].map(a => `<span class="pill">${a}</span>`).join("");
+}
+
+function rebuildOptions() {
+  // 1) Beregn hvilke kategorier som fortsatt er lovlige gitt valgte forfattere
+  let allowedCats;
+  if (selectedAuthors.size === 0) {
+    allowedCats = new Set(DATA.categories);
+  } else {
+    const sets = [...selectedAuthors].map(a => authorCats(a));
+    allowedCats = unionSet(sets);
+  }
+
+  // 2) Beregn hvilke forfattere som er lovlige gitt valgte kategorier
+  let allowedAuthors;
+  if (selectedCats.size === 0) {
+    allowedAuthors = new Set(Object.keys(DATA.authors));
+  } else {
+    allowedAuthors = new Set();
+    for (const a of Object.keys(DATA.authors)) {
+      const cats = authorCats(a);
+      let ok = false;
+      for (const c of selectedCats) if (cats.has(c)) ok = true;
+      if (ok) allowedAuthors.add(a);
+    }
+  }
+
+  // 3) Prune valgte ting som ikke lenger er lovlige
+  for (const c of [...selectedCats]) {
+    if (!allowedCats.has(c)) {
+      selectedCats.delete(c);
+      log(`Pruning: fjernet kategori "${c}" (inkonsistent med forfattervalg).`);
+    }
+  }
+  for (const a of [...selectedAuthors]) {
+    if (!allowedAuthors.has(a)) {
+      selectedAuthors.delete(a);
+      log(`Pruning: fjernet forfatter "${a}" (inkonsistent med kategorivalg).`);
+    }
+  }
+
+  // 4) Render checkbokser på nytt
+  catContainer.innerHTML = "";
+  for (const c of DATA.categories) {
+    const disabled = !allowedCats.has(c);
+    const checked = selectedCats.has(c);
+    const id = `cat-${c}`;
+    const div = document.createElement("div");
+    div.className = "check-item";
+    div.innerHTML = `
+      <input type="checkbox" id="${id}" value="${c}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <label for="${id}" style="color:${disabled ? "#4b5563" : "#e5e7eb"}">${c}</label>
+    `;
+    const box = div.querySelector("input");
+    box.addEventListener("change", () => {
+      if (box.checked) {
+        selectedCats.add(c);
+      } else {
+        selectedCats.delete(c);
+      }
+      log(`Valgte kategorier: ${[...selectedCats].join(", ") || "∅"}`);
+      rebuildOptions();
+    });
+    catContainer.appendChild(div);
+  }
+
+  authContainer.innerHTML = "";
+  for (const a of Object.keys(DATA.authors)) {
+    const disabled = !allowedAuthors.has(a);
+    const checked = selectedAuthors.has(a);
+    const id = `auth-${a}`;
+    const div = document.createElement("div");
+    div.className = "check-item";
+    div.innerHTML = `
+      <input type="checkbox" id="${id}" value="${a}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <label for="${id}" style="color:${disabled ? "#4b5563" : "#e5e7eb"}">
+        ${a} (${[...authorCats(a)].join(", ")})
+      </label>
+    `;
+    const box = div.querySelector("input");
+    box.addEventListener("change", () => {
+      if (box.checked) {
+        selectedAuthors.add(a);
+      } else {
+        selectedAuthors.delete(a);
+      }
+      log(`Valgte forfattere: ${[...selectedAuthors].join(", ") || "∅"}`);
+      rebuildOptions();
+    });
+    authContainer.appendChild(div);
+  }
+
+  renderPills();
+  updateGraphHighlight();
+
+}
+
+// Reset
+document.getElementById("resetBtn").addEventListener("click", () => {
+  selectedCats.clear();
+  selectedAuthors.clear();
+  log("Reset.");
+  rebuildOptions();
+});
+
+// Init
+rebuildOptions();
+log("Prøv: klikk barnebok + dramatikk, så Ibsen → barnebok prunes. Gå via Løland for å nå den ellers utilgjengelige tilstanden.");
+updateGraphHighlight();
+
+// --- Korpusbygging (union-modus)
+const subcorporaEl = document.getElementById("subcorpora");
+const unionOutEl = document.getElementById("unionOut");
+let subcorpora = [];
+
+function renderSubcorpora() {
+  subcorporaEl.innerHTML = subcorpora.map((sc, i) => `
+    <div class="log" style="margin-bottom:6px;">
+      #${i+1} cats=${[...sc.cats].join("|") || "∅"} ; authors=${[...sc.authors].join("|") || "∅"}
+      <button data-i="${i}" class="secondary" style="float:right;margin-top:-2px;">Slett</button>
+    </div>
+  `).join("");
+  subcorporaEl.querySelectorAll("button").forEach(b => {
+    b.addEventListener("click", () => {
+      subcorpora.splice(Number(b.dataset.i), 1);
+      renderSubcorpora();
+    });
+  });
+}
+
+document.getElementById("addSubcorpusBtn").addEventListener("click", () => {
+  subcorpora.push({ cats: new Set(selectedCats), authors: new Set(selectedAuthors) });
+  log(`La til delkorpus #${subcorpora.length}.`);
+  renderSubcorpora();
+});
+
+document.getElementById("unionBtn").addEventListener("click", () => {
+  const uCats = unionSet(subcorpora.map(sc => sc.cats));
+  const uAuthors = unionSet(subcorpora.map(sc => sc.authors));
+  unionOutEl.textContent = `cats={${[...uCats].join(", ")}};\nauthors={${[...uAuthors].join(", ")}}`;
+  log("Union bygget — slutt-evaluert global gyldighet uten begrensningen av nåbarhet.");
+});
+
+// --- PWA install prompt
+let deferredPrompt = null;
+const installBtn = document.getElementById("installBtn");
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = "block";
+});
+
+installBtn.addEventListener("click", async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installBtn.style.display = "none";
+});
+
+// Service worker registrering
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
+</script>
+</body>
+</html>
