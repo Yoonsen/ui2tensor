@@ -9,7 +9,7 @@
   "license": "ISC",
   "author": "Lars G. Bagøien Johnsen",
   "scripts": {
-    "dev": "npx http-server public -c-1 -p 5173",
+    "dev": "npx http-server docs -c-1 -p 4500",
     "start": "npm run dev"
   },
   "devDependencies": {
